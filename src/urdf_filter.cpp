@@ -44,13 +44,15 @@ RealtimeURDFFilter::RealtimeURDFFilter (ros::NodeHandle &nh, int argc, char **ar
   , fbo_initialized_(false)
   , depth_image_pbo_ (GL_INVALID_VALUE)
   , depth_texture_(GL_INVALID_VALUE)
+  , active_(false)
   , width_(0)
   , height_(0)
   , camera_tx_(0)
   , camera_ty_(0)
   , far_plane_ (8)
   , near_plane_ (0.1)
-  , argc_ (argc), argv_(argv)
+  , argc_ (argc)
+  , argv_(argv)
 {
   // get fixed frame name
   XmlRpc::XmlRpcValue v;
@@ -105,11 +107,27 @@ RealtimeURDFFilter::RealtimeURDFFilter (ros::NodeHandle &nh, int argc, char **ar
   filter_replace_value_ = (double)v;
   ROS_INFO ("using filter replace value %f", filter_replace_value_);
 
+  // fitler replace value
+  nh_.getParam ("transport_hints", v);
+  ROS_ASSERT (v.getType() == XmlRpc::XmlRpcValue::TypeString && "need a transport_hints paramter!");
+  hints_ = image_transport::TransportHints((std::string)v);
+  ROS_INFO ("using filter replace value %f", filter_replace_value_);
+
   // setup publishers 
-  depth_sub_ = image_transport_.subscribeCamera("input_depth", 10,
-      &RealtimeURDFFilter::filter_callback, this);
-  depth_pub_ = image_transport_.advertiseCamera("output_depth", 10);
-  mask_pub_ = image_transport_.advertiseCamera("output_mask", 10);
+  ros::SubscriberStatusCallback cb = boost::bind(&RealtimeURDFFilter::subscription_callback, this);
+  image_transport::SubscriberStatusCallback it_cb = boost::bind(&RealtimeURDFFilter::it_subscription_callback, this, _1);
+  depth_pub_ = image_transport_.advertiseCamera("output_depth", 10, it_cb, it_cb, cb, cb);
+  mask_pub_ = image_transport_.advertiseCamera("output_mask", 10, it_cb, it_cb, cb, cb);
+
+  if(show_gui_)
+  {
+    depth_sub_ = image_transport_.subscribeCamera("input_depth", 10, &RealtimeURDFFilter::filter_callback, this, hints_);
+    active_ = true;
+  }
+  else
+  {
+    ROS_INFO("Everything is ready. Waiting for subscription of topics...");
+  }
 }
 
 RealtimeURDFFilter::~RealtimeURDFFilter ()
@@ -196,12 +214,6 @@ void RealtimeURDFFilter::filter (
     return;
   }
 
-  if (mask_pub_.getNumSubscribers() > 0) {
-    need_mask_ = true;
-  } else {
-    need_mask_ = false;
-  }
-
   // get depth_image into OpenGL texture buffer
   int size_in_bytes = width_ * height_ * sizeof(float);
   textureBufferFromDepthBuffer(buffer, size_in_bytes);
@@ -239,11 +251,38 @@ void RealtimeURDFFilter::filter (
   }
 }
 
+void RealtimeURDFFilter::subscription_callback()
+{
+  boost::lock_guard<boost::mutex> guard(lock_);
+  need_mask_ = mask_pub_.getNumSubscribers() > 0;
+  need_depth_ = depth_pub_.getNumSubscribers() > 0;
+  bool connected = show_gui_ || need_mask_ || need_depth_;
+
+  if(connected && !active_)
+  {
+    ROS_INFO("new subscription to topics. starting filter...");
+    depth_sub_ = image_transport_.subscribeCamera("input_depth", 10, &RealtimeURDFFilter::filter_callback, this, hints_);
+    active_ = true;
+  }
+  else if(!connected && active_)
+  {
+    ROS_INFO("no subscription to topics. stopping filter...");
+    depth_sub_.shutdown();
+    active_ = false;
+  }
+}
+
+void RealtimeURDFFilter::it_subscription_callback(const image_transport::SingleSubscriberPublisher &)
+{
+  subscription_callback();
+}
+
 // callback function that gets ROS images and does everything
 void RealtimeURDFFilter::filter_callback
      (const sensor_msgs::ImageConstPtr& ros_depth_image,
       const sensor_msgs::CameraInfo::ConstPtr& camera_info)
 {
+  boost::lock_guard<boost::mutex> guard(lock_);
   // Debugging
   ROS_DEBUG_STREAM("Received image with camera info: "<<*camera_info);
 
@@ -277,7 +316,7 @@ void RealtimeURDFFilter::filter_callback
   this->filter(buffer, projection_matrix, depth_image.cols, depth_image.rows);
 
   // publish processed depth image and image mask
-  if (depth_pub_.getNumSubscribers() > 0)
+  if (need_depth_)
   {
     cv::Mat masked_depth_image (height_, width_, CV_32FC1, masked_depth_);
     if(ros_depth_image->encoding == sensor_msgs::image_encodings::TYPE_16UC1)
@@ -292,7 +331,7 @@ void RealtimeURDFFilter::filter_callback
     depth_pub_.publish (out_masked_depth.toImageMsg (), camera_info);
   }
 
-  if (mask_pub_.getNumSubscribers() > 0)
+  if (need_mask_)
   {
     cv::Mat mask_image (height_, width_, CV_8UC1, mask_);
 
@@ -702,8 +741,11 @@ void RealtimeURDFFilter::render (const double* camera_projection_matrix)
     glPopMatrix();
   } 
 
-  fbo_->bind(1);
-  glGetTexImage (fbo_->getTextureTarget(), 0, GL_RED, GL_FLOAT, masked_depth_);
+  if (need_depth_)
+  {
+    fbo_->bind(1);
+    glGetTexImage (fbo_->getTextureTarget(), 0, GL_RED, GL_FLOAT, masked_depth_);
+  }
   if (need_mask_)
   {
     fbo_->bind(3);

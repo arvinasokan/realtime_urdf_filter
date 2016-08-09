@@ -67,6 +67,10 @@ class RealtimeURDFFilter
          (const sensor_msgs::ImageConstPtr& ros_depth_image,
           const sensor_msgs::CameraInfo::ConstPtr& camera_info);
 
+    // callback function that gets if subscription to topics change
+    void subscription_callback();
+    void it_subscription_callback(const image_transport::SingleSubscriberPublisher &);
+
     // does virtual rendering and filtering based on depth buffer and opengl proj. matrix
     void filter (
         unsigned char* buffer, double* glTf, int width, int height);
@@ -99,6 +103,7 @@ class RealtimeURDFFilter
     image_transport::CameraSubscriber depth_sub_;
     image_transport::CameraPublisher depth_pub_;
     image_transport::CameraPublisher mask_pub_;
+    image_transport::TransportHints hints_;
 
     // rendering objects
     FramebufferObject *fbo_;
@@ -116,8 +121,12 @@ class RealtimeURDFFilter
     std::string fixed_frame_;
     bool show_gui_;
 
-    // do we have subscribers for the mask image?
-    bool need_mask_;
+    // do we have subscribers for the images?
+    bool need_mask_, need_depth_;
+
+    // is the filtering running or waiting?
+    bool active_;
+    boost::mutex lock_;
 
     // image size
     GLint width_;
