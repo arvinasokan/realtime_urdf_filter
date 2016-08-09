@@ -8,6 +8,7 @@ uniform float replace_value;
 
 uniform float z_near;
 uniform float z_far;
+uniform float z_bg;
 
 uniform float max_diff;
 
@@ -20,7 +21,7 @@ void main(void)
 {
   float sensor_depth = texelFetch (depth_texture, int(gl_FragCoord.y)*width + int(gl_FragCoord.x)).x;
   float virtual_depth = to_linear_depth (gl_FragCoord.z);
-  float should_filter = float(sensor_depth > (virtual_depth - max_diff));
+  float should_filter = float(virtual_depth < z_bg && (sensor_depth > (virtual_depth - max_diff) || sensor_depth <= z_near));
 
   // first color attachment: sensor depth image
   gl_FragData[0] = vec4 (sensor_depth, sensor_depth, sensor_depth, 1.0);

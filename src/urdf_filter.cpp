@@ -564,10 +564,10 @@ void RealtimeURDFFilter::render (const double* camera_projection_matrix)
   // Draw background quad behind everything (just before the far plane)
   // Otherwise, the shader only sees kinect points where he rendered stuff
   glBegin(GL_QUADS);
-    glVertex3f(-100.0, -100.0, far_plane_*0.99);
-    glVertex3f( 100.0, -100.0, far_plane_*0.99);
-    glVertex3f( 100.0,  100.0, far_plane_*0.99);
-    glVertex3f(-100.0,  100.0, far_plane_*0.99);
+    glVertex3f(-100.0, -100.0, far_plane_ - 0.01);
+    glVertex3f( 100.0, -100.0, far_plane_ - 0.01);
+    glVertex3f( 100.0,  100.0, far_plane_ - 0.01);
+    glVertex3f(-100.0,  100.0, far_plane_ - 0.01);
   glEnd();
  
   // Transformation matrix
@@ -602,6 +602,7 @@ void RealtimeURDFFilter::render (const double* camera_projection_matrix)
   shader.SetUniformVal1i (std::string("height"), int(height_));
   shader.SetUniformVal1f (std::string("z_far"), far_plane_);
   shader.SetUniformVal1f (std::string("z_near"), near_plane_);
+  shader.SetUniformVal1f (std::string("z_bg"), far_plane_ - 0.02);
   shader.SetUniformVal1f (std::string("max_diff"), float(depth_distance_threshold_));
   shader.SetUniformVal1f (std::string("replace_value"), float(filter_replace_value_));
   glBindTexture (GL_TEXTURE_BUFFER, depth_texture_);
